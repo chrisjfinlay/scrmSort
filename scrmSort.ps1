@@ -1,7 +1,7 @@
 # scrmSort
 # original author: Chris Finlay
 # For sorting SCRM localised delivery packages 
-# v0.6.4
+# v0.6.6
 # Changelog at end of file
 
 ##########################
@@ -142,18 +142,19 @@ function Compare-Filetypes {
             $htmlFilesCount++
         }
         else {
-            $nonHtmlFiles.Add($filetoCheck)
+            # PS outputs the index of the item added. We don't want that clutter!
+            $nonHtmlFiles.Add($filetoCheck) | Out-Null
             $nonHtmlFilesCount++
         }
     }
-
     if ($htmlFilesCount -ne $filesToCheck.Count){
-        Write-Host "There are"$nonHtmlFilesCount" files without the extension .html. Please check input and re-run script." -BackgroundColor Red -ForegroundColor Black 
+        Write-Host "There are"$nonHtmlFilesCount" files without the extension .html. Press enter to discard these files." -BackgroundColor Red -ForegroundColor Black 
+        Write-Host "The files will NOT be removed from the original source directory." -BackgroundColor Red -ForegroundColor Black 
         foreach ($nonHtmlFile in $nonHtmlFiles) {
-            Write-Host $nonHtmlFile -BackgroundColor Red -ForegroundColor Black 
+            Write-Host "Remove"$nonHtmlFile"?" -BackgroundColor Red -ForegroundColor Black
+            Pause
+            Remove-Item $nonHtmlFile.fullName
         }
-        Pause
-        exit
     }
 }
 
@@ -163,7 +164,7 @@ function Convert-ImageLanguages {
     $directoryToLocalise = @(Get-ChildItem $outputLocation\_finalOutput -Recurse)
     foreach ($fileToLocalise in $directoryToLocalise) {
         if ($null -eq $fileToLocalise -or ($fileToLocalise.Attributes -band [IO.FileAttributes]::Directory) -ne [IO.FileAttributes]::Directory) {    
-            Write-Host $fileToLocalise    
+            Write-Host $fileToLocalise
             $nameAndExtension = $fileToLocalise -split("\.")
             $localeLicenceAndLanguage = $nameAndExtension[0] -split("_")
             $language = $localeLicenceAndLanguage[2]
@@ -178,10 +179,16 @@ function Convert-ImageLanguages {
                 $language = $language.ToUpper()
                 $newImageLanguage = "_"+$licence+"_"+$language+".png"
             }
-            (Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "_EN.png", $newImageLanguage} | Set-Content $fileToLocalise.fullName -Encoding UTF8         
+            # PS5.1 interprets -Encoding UTF8 as UTF8-BOM - which causes problems with SCRM entering a blank line at the start.
+            # Because we can't install later versions of PS which support -Encoding UTF8NoBOM, we have to do a little trickery to get it to do what we want
+            # Old method kept here for posterity, in case we ever do get the ability to run newer versions of PS
+            #(Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "_EN.png", $newImageLanguage} | Set-Content $fileToLocalise.fullName -Encoding UTF8
+            $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+            $finalFileContent = (Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "_EN.png", $newImageLanguage}
+            [System.IO.File]::WriteAllLines($fileToLocalise.fullName, $finalFileContent, $Utf8NoBomEncoding)
         }
         else {
-           
+           # directory found, move on.
         }
     } 
 }
@@ -197,45 +204,45 @@ Clear-Host
 Write-Host -BackgroundColor Black -ForegroundColor DarkCyan "===================="
 Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray "scrmSort"
 Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray " "
-Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray " 0.6.4 "
+Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray " 0.6.6 "
 Write-Host -BackgroundColor DarkMagenta -ForegroundColor Gray "    "
 Write-Host -BackgroundColor Black -ForegroundColor DarkCyan "===================="
 Write-Host -BackgroundColor Red -ForegroundColor White "Please ensure target directory is empty before use. If it is not, the script will delete all existing contents. "
 
 $deliveryLocation = read-host "Please enter the location of the delivery from Translation"
-        # If nothing entered, use a default path for testing
-        if ($deliveryLocation -eq "" ){
-            $deliveryLocation = "C:\Users\finlachr\Documents\_work\StarsCRM Batch Tool\Example delivery"
-        }
-        if ($deliveryLocation -match ".zip") {
-            Write-Host "Zip file found" -ForegroundColor Yellow -BackgroundColor Black
-            $deliveryLocation = $deliveryLocation.TrimStart("`"")
-            $deliveryLocation = $deliveryLocation.TrimEnd("`"")
-            $drive = $deliveryLocation -split(":")
-            $decompressedLocation = $drive[0]+":\scrmSort"
-            Write-Host $decompressedLocation
-            if (Test-Path $decompressedLocation){
-                Remove-Item ($decompressedLocation) -Recurse
-            }
-            try {
-                Expand-Archive $deliveryLocation -DestinationPath $decompressedLocation -ErrorAction Stop
-            }
-            catch {
-                Write-Host "An error ocurred:" -BackgroundColor Red -ForegroundColor Black 
-                Write-Host $_ -BackgroundColor Red -ForegroundColor Black 
-                Write-Host "The script will now exit."
-                pause
-                exit
-            }
-            $deliveryLocation = $decompressedLocation
-            $fromZip = $true
-        }
+# If nothing entered, use a default path for testing
+if ($deliveryLocation -eq "" ){
+    $deliveryLocation = "C:\Users\finlachr\Documents\_work\StarsCRM Batch Tool\Example delivery"
+}
+if ($deliveryLocation -match ".zip") {
+    Write-Host "Zip file found" -ForegroundColor Yellow -BackgroundColor Black
+    $deliveryLocation = $deliveryLocation.TrimStart("`"")
+    $deliveryLocation = $deliveryLocation.TrimEnd("`"")
+    $drive = $deliveryLocation -split(":")
+    $decompressedLocation = $drive[0]+":\scrmSort"
+    Write-Host $decompressedLocation
+    if (Test-Path $decompressedLocation){
+        Remove-Item ($decompressedLocation) -Recurse
+    }
+    try {
+        Expand-Archive $deliveryLocation -DestinationPath $decompressedLocation -ErrorAction Stop
+    }
+    catch {
+        Write-Host "An error ocurred:" -BackgroundColor Red -ForegroundColor Black 
+        Write-Host $_ -BackgroundColor Red -ForegroundColor Black 
+        Write-Host "The script will now exit."
+        pause
+        exit
+    }
+    $deliveryLocation = $decompressedLocation
+    $fromZip = $true
+}
 Write-Host -BackgroundColor DarkCyan -ForegroundColor Black "Copying from" $deliveryLocation
 $outputLocation = read-host "Please enter the desired output location. Target location should be an empty folder"
-        # If nothing entered, use a default path for testing
-        if ($outputLocation -eq "" ){
-            $outputLocation = "C:\Users\finlachr\Documents\_upload\_test"
-        }
+# If nothing entered, use a default path for testing
+if ($outputLocation -eq "" ){
+    $outputLocation = "C:\Users\finlachr\Documents\_upload\_test"
+}
 Write-Host -BackgroundColor DarkCyan -ForegroundColor Black "Copying to" $outputLocation
 Write-Host -BackgroundColor DarkCyan -ForegroundColor White "Setting up folders and copying delivery"
 
@@ -339,3 +346,5 @@ Pause
 # v0.6.2 - Script will now open the _finalOutput folder for you once the archive compression is complete
 # v0.6.3 - Fixed bug where image names were returned as ".PNG" instead of ".png"
 # v0.6.4 - Fixed bug where cyrillic characters were mangled when updating image names
+# v0.6.5 - Fixed bug where files were saved as UTF8-BOM encoding instead of UTF8
+# v0.6.6 - Changed behaviour of fuile type checking to prompt user about non-html files, and remove
