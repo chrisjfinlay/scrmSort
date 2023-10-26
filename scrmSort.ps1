@@ -1,7 +1,7 @@
 # scrmSort
 # original author: Chris Finlay
 # For sorting SCRM localised delivery packages 
-# v0.6.6
+# v0.7.8
 # Changelog at end of file
 
 ##########################
@@ -179,12 +179,53 @@ function Convert-ImageLanguages {
                 $language = $language.ToUpper()
                 $newImageLanguage = "_"+$licence+"_"+$language+".png"
             }
+            # A little more encoding trickery is needed here. It seems that foreign characters are getting corrupted when WriteAllLines rewrites the file with the replaced image name, if the file it was rewriting was encoded in UTF8. If the file it's rewriting is encoded in UTF8-BOM, then it works fine. So we need to make PS encode the file in UTF8-BOM, then do the swap back to UTF8.
+            [System.Io.File]::ReadAllText($fileToLocalise.fullName) | Out-File -FilePath $fileToLocalise.fullName -Encoding UTF8
+
             # PS5.1 interprets -Encoding UTF8 as UTF8-BOM - which causes problems with SCRM entering a blank line at the start.
             # Because we can't install later versions of PS which support -Encoding UTF8NoBOM, we have to do a little trickery to get it to do what we want
             # Old method kept here for posterity, in case we ever do get the ability to run newer versions of PS
             #(Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "_EN.png", $newImageLanguage} | Set-Content $fileToLocalise.fullName -Encoding UTF8
             $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
             $finalFileContent = (Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "_EN.png", $newImageLanguage}
+            [System.IO.File]::WriteAllLines($fileToLocalise.fullName, $finalFileContent, $Utf8NoBomEncoding)
+        }
+        else {
+           # directory found, move on.
+        }
+    } 
+}
+
+function Convert-Locales {
+    # Files will contain references to locale-en, and for languages will need changed to the appropriate languages
+    Write-Host "Converting locale-en text in files" -ForegroundColor White -BackgroundColor Green
+    $directoryToLocalise = @(Get-ChildItem $outputLocation\_finalOutput -Recurse)
+    foreach ($fileToLocalise in $directoryToLocalise) {
+        if ($null -eq $fileToLocalise -or ($fileToLocalise.Attributes -band [IO.FileAttributes]::Directory) -ne [IO.FileAttributes]::Directory) {    
+            Write-Host $fileToLocalise
+            $nameAndExtension = $fileToLocalise -split("\.")
+            $localeLicenceAndLanguage = $nameAndExtension[0] -split("_")
+            $language = $localeLicenceAndLanguage[2]
+            $licence = $localeLicenceAndLanguage[1]
+            # If the licence is GLOBAL (e.g. XXX-YYY_GLOBAL_FR.html), discard licence and only use language portion for image name.
+            # Same logic applies if the licence and language match, (e.g. XXX-YYY_GLOBAL_DA_DA.html). This would expect only the language for the name.
+            if ($licence -eq "GLOBAL" -or $licence -eq $language) {
+                $language = $language.ToLower()
+                $newLocaleLanguage = "locale-"+$language
+            } else {
+                $licence = $licence.ToLower()
+                $language = $language.ToLower()
+                $newLocaleLanguage = "locale-"+$language
+            }
+            # A little more encoding trickery is needed here. It seems that foreign characters are getting corrupted when WriteAllLines rewrites the file with the replaced image name, if the file it was rewriting was encoded in UTF8. If the file it's rewriting is encoded in UTF8-BOM, then it works fine. So we need to make PS encode the file in UTF8-BOM, then do the swap back to UTF8.
+            [System.Io.File]::ReadAllText($fileToLocalise.fullName) | Out-File -FilePath $fileToLocalise.fullName -Encoding UTF8
+
+            # PS5.1 interprets -Encoding UTF8 as UTF8-BOM - which causes problems with SCRM entering a blank line at the start.
+            # Because we can't install later versions of PS which support -Encoding UTF8NoBOM, we have to do a little trickery to get it to do what we want
+            # Old method kept here for posterity, in case we ever do get the ability to run newer versions of PS
+            #(Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "_EN.png", $newImageLanguage} | Set-Content $fileToLocalise.fullName -Encoding UTF8
+            $Utf8NoBomEncoding = New-Object System.Text.UTF8Encoding $False
+            $finalFileContent = (Get-Content $fileToLocalise.fullName) | Foreach-Object {$_ -replace "locale-en", $newLocaleLanguage}
             [System.IO.File]::WriteAllLines($fileToLocalise.fullName, $finalFileContent, $Utf8NoBomEncoding)
         }
         else {
@@ -204,7 +245,7 @@ Clear-Host
 Write-Host -BackgroundColor Black -ForegroundColor DarkCyan "===================="
 Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray "scrmSort"
 Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray " "
-Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray " 0.6.6 "
+Write-Host -NoNewLine -BackgroundColor DarkMagenta -ForegroundColor Gray " 0.7.8 "
 Write-Host -BackgroundColor DarkMagenta -ForegroundColor Gray "    "
 Write-Host -BackgroundColor Black -ForegroundColor DarkCyan "===================="
 Write-Host -BackgroundColor Red -ForegroundColor White "Please ensure target directory is empty before use. If it is not, the script will delete all existing contents. "
@@ -292,22 +333,55 @@ $workingCollection = @(Get-ChildItem $outputLocation\_working)
 Write-Host -NoNewline "Found"$workingCollection.Count"files in \_working, expected"$fileCount "files. "
 if ($workingCollection.Count -eq $fileCount) {
     Write-Host "Moving on!" -BackgroundColor Green -ForegroundColor Black
-}
-else {
+} else {
     Write-Host ""
     Write-Host "A different amount of files exists in the _working directory than were found in the original delivery. " -BackgroundColor Red -ForegroundColor Black 
+    Write-Host "A common cause is non-html files (e.g. Word documents for reference) with the same name, in different folders. " -BackgroundColor Red -ForegroundColor Black 
     Write-Host "The script will exit. Please check the delivery for duplicated filenames." -BackgroundColor Red -ForegroundColor Black
     pause
     exit
 }
 
 foreach ($fileToCheck in $workingCollection){
-    # Translation submit Slovnia files as si.html, but StarsCRM expects sl.html instead. 
+    # Translation submit some files with a different language code to what SCRM expects, so this is to correct them in the final upload package
     $sloveniaPattern = "si.html"
-    if($fileToCheck.Name -match $sloveniaPattern){ 
-        Write-Host "File named si.html found. Renaming to sl.html" -ForegroundColor Yellow -BackgroundColor Black
+    $czechiaPattern = "cz.html"
+    $simpChinesePattern = "zhs.html"
+    $tradChinesePattern = "zht.html"
+    $swedenPattern = "se.html"
+    $ukrainePattern = "ua.html"
+    if ($fileToCheck.Name -match $sloveniaPattern) { 
         $new_name = $fileToCheck.Name -replace $sloveniaPattern, "sl.html"
+        Write-Host -NoNewline "Renaming Slovenia file"$fileToCheck "to " -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host $new_name -ForegroundColor Black -BackgroundColor Yellow
         Rename-Item -Path $fileToCheck.FullName -NewName $new_name
+    } ElseIf ($fileToCheck.Name -match $czechiaPattern) { 
+        $new_name = $fileToCheck.Name -replace $czechiaPattern, "cs.html"
+        Write-Host -NoNewline "Renaming Czechia file"$fileToCheck "to " -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host $new_name -ForegroundColor Black -BackgroundColor Yellow
+        Rename-Item -Path $fileToCheck.FullName -NewName $new_name
+    } ElseIf ($fileToCheck.Name -match $simpChinesePattern) { 
+        $new_name = $fileToCheck.Name -replace $simpChinesePattern, "zh-cn.html"
+        Write-Host -NoNewline "Renaming Simplified Chinese file"$fileToCheck "to " -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host $new_name -ForegroundColor Black -BackgroundColor Yellow
+        Rename-Item -Path $fileToCheck.FullName -NewName $new_name
+    } ElseIf ($fileToCheck.Name -match $tradChinesePattern) { 
+        $new_name = $fileToCheck.Name -replace $tradChinesePattern, "zh-tw.html"
+        Write-Host -NoNewline "Renaming Traditional Chinese file"$fileToCheck "to " -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host $new_name -ForegroundColor Black -BackgroundColor Yellow
+        Rename-Item -Path $fileToCheck.FullName -NewName $new_name
+    } ElseIf ($fileToCheck.Name -match $swedenPattern) { 
+        $new_name = $fileToCheck.Name -replace $swedenPattern, "sv.html"
+        Write-Host -NoNewline "Renaming Sweden file"$fileToCheck "to " -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host $new_name -ForegroundColor Black -BackgroundColor Yellow
+        Rename-Item -Path $fileToCheck.FullName -NewName $new_name
+    } ElseIf ($fileToCheck.Name -match $ukrainePattern) { 
+        $new_name = $fileToCheck.Name -replace $ukrainePattern, "uk.html"
+        Write-Host -NoNewline "Renaming Ukraine file"$fileToCheck "to " -ForegroundColor Yellow -BackgroundColor Black
+        Write-Host $new_name -ForegroundColor Black -BackgroundColor Yellow
+        Rename-Item -Path $fileToCheck.FullName -NewName $new_name
+    } else {
+        Write-Host "No renaming needed for file "$fileToCheck -ForegroundColor Yellow -BackgroundColor Black
     }
 }
 
@@ -319,6 +393,7 @@ foreach ($file in $workingCollection) {
         Copy-Languages $file
 }
 Convert-ImageLanguages
+Convert-Locales
 Compress-Results
 
 Write-Host "File copying and sorting complete." -BackgroundColor Green -ForegroundColor White
@@ -348,3 +423,6 @@ Pause
 # v0.6.4 - Fixed bug where cyrillic characters were mangled when updating image names
 # v0.6.5 - Fixed bug where files were saved as UTF8-BOM encoding instead of UTF8
 # v0.6.6 - Changed behaviour of fuile type checking to prompt user about non-html files, and remove
+# v0.6.7 - Fixed bug related to files encoding
+# v0.6.8 - Added more languages to the rename block
+# v0.7.8 - Added Convert-Locales to change locale-en into localised forms
